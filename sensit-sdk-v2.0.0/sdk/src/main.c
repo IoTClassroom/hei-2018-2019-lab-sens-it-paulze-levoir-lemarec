@@ -17,10 +17,16 @@
 #include "hts221.h"
 #include "ltr329.h"
 #include "fxos8700.h"
+#include "discovery.h"
+
 
 
 /******* GLOBAL VARIABLES ******************************************/
-u8 firmware_version[] = "TEMPLATE";
+u8 firmware_version[] = "VIBR_v2.0.0";
+
+#define VIBRATION_THRESHOLD                0x10 /* With 2g range, 3,9 mg threshold */
+#define VIBRATION_COUNT                    2
+
 
 
 /*******************************************************************/
@@ -30,23 +36,13 @@ int main()
     error_t err;
     button_e btn;
     u16 battery_level;
+    bool send = FALSE;
+
+    /* Discovery payload variable */
+    discovery_data_s data = {0};
+    discovery_payload_s payload;
 
     /* Start of initialization */
-
-    /* Configure button */
-    SENSIT_API_configure_button(INTERRUPT_BOTH_EGDE);
-
-    /* Initialize Sens'it radio */
-    err = RADIO_API_init();
-    ERROR_parser(err);
-
-    /* Initialize temperature & humidity sensor */
-    err = HTS221_init();
-    ERROR_parser(err);
-
-    /* Initialize light sensor */
-    err = LTR329_init();
-    ERROR_parser(err);
 
     /* Initialize accelerometer */
     err = FXOS8700_init();
@@ -57,63 +53,30 @@ int main()
 
     /* End of initialization */
 
+
+    FXOS8700_set_transient_mode (FXOS8700_RANGE_2G, VIBRATION_THRESHOLD, VIBRATION_COUNT);
+
     while (TRUE)
     {
         /* Execution loop */
 
-        /* Check of battery level */
-        BATTERY_handler(&battery_level);
-
-        /* RTC alarm interrupt handler */
-        if ((pending_interrupt & INTERRUPT_MASK_RTC) == INTERRUPT_MASK_RTC)
+/* Check of battery level */
+        BATTERY_handler(&(data.battery));
+        
+     if(FXOS8700_clear_transient_interrupt(&(data.vibration)));
         {
-            /* Clear interrupt */
-            pending_interrupt &= ~INTERRUPT_MASK_RTC;
-        }
+            /* Build the payload */
+            DISCOVERY_build_payload(&payload, MODE_VIBRATION, &data);
 
-        /* Button interrupt handler */
-        if ((pending_interrupt & INTERRUPT_MASK_BUTTON) == INTERRUPT_MASK_BUTTON)
-        {
-            /* RGB Led ON during count of button presses */
-            SENSIT_API_set_rgb_led(RGB_WHITE);
+            /* Send the message */
+            err = RADIO_API_send_message(RGB_YELLOW, (u8*)&payload, DISCOVERY_PAYLOAD_SIZE, FALSE, NULL);
+            /* Parse the error code */
+            ERROR_parser(err);
+    }
 
-            /* Count number of presses */
-            btn = BUTTON_handler();
+      
+}
 
-            /* RGB Led OFF */
-            SENSIT_API_set_rgb_led(RGB_OFF);
-
-            if (btn == BUTTON_FOUR_PRESSES)
-            {
-                /* Reset the device */
-                SENSIT_API_reset();
-            }
-
-            /* Clear interrupt */
-            pending_interrupt &= ~INTERRUPT_MASK_BUTTON;
-        }
-
-        /* Reed switch interrupt handler */
-        if ((pending_interrupt & INTERRUPT_MASK_REED_SWITCH) == INTERRUPT_MASK_REED_SWITCH)
-        {
-            /* Clear interrupt */
-            pending_interrupt &= ~INTERRUPT_MASK_REED_SWITCH;
-        }
-
-        /* Accelerometer interrupt handler */
-        if ((pending_interrupt & INTERRUPT_MASK_FXOS8700) == INTERRUPT_MASK_FXOS8700)
-        {
-            /* Clear interrupt */
-            pending_interrupt &= ~INTERRUPT_MASK_FXOS8700;
-        }
-
-        /* Check if all interrupt have been clear */
-        if (pending_interrupt == 0)
-        {
-            /* Wait for Interrupt */
-            SENSIT_API_sleep(FALSE);
-        }
-    } /* End of while */
 }
 
 /*******************************************************************/
